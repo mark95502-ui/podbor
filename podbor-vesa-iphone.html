@@ -22,7 +22,9 @@ textarea{min-height:90px}
 .big{font-size:34px;font-weight:700;text-align:center}
 .mut{color:var(--mut);font-size:14px}.ok{color:var(--ok)}.bad{color:var(--bad)}
 .chip{display:inline-block;padding:3px 8px;margin:2px;border:1px solid var(--bd);border-radius:8px;font-variant-numeric:tabular-nums}
-video{width:100%;border-radius:10px;background:#000;max-height:260px;object-fit:cover}
+video{width:100%;border-radius:10px;background:#000;max-height:360px;object-fit:cover}
+.scan-help{margin-top:6px;text-align:center}
+#cam:disabled{opacity:.65}
 .done{opacity:.45}
 label{font-size:13px;color:var(--mut)}
 details summary{cursor:pointer;color:var(--mut)}
@@ -34,7 +36,8 @@ details summary{cursor:pointer;color:var(--mut)}
  <div class="card">
   <div class="big" id="last">—</div>
   <div class="mut" style="text-align:center" id="msg">Сфотографируйте штрихкод или введите вручную</div>
-  <video id="v" playsinline muted hidden></video>
+  <video id="v" playsinline muted autoplay hidden></video>
+  <div id="scanHelp" class="mut scan-help" hidden>Наведите камеру на штрихкод, держите телефон неподвижно</div>
   <label style="display:block;text-align:center;margin-top:8px;padding:14px;border-radius:10px;background:var(--ac);color:#fff;font-size:17px"><input type="file" id="shot" accept="image/*" capture="environment" hidden>📷 Сфотографировать штрихкод</label>
   <div class="row" style="margin-top:8px"><button class="b r" id="cam">Живое сканирование: старт</button></div>
   <div class="row" style="margin-top:8px"><input id="man" inputmode="decimal" placeholder="Штрихкод или вес (2.047)"><button class="b" id="add" style="flex:0 0 100px">Добавить</button></div>
@@ -90,33 +93,66 @@ function addItem(raw){
  renderStock();return true}
 
 /* camera */
-var zr=null,live=false,last={c:'',t:0};
+var zr=null,live=false,last={c:'',t:0},liveControls=null,scanTimer=null;
 function mkReader(){
- if(!window.ZXing){msg('Не загрузилась библиотека сканера. Нужен интернет при открытии страницы.','bad');return null}
+ if(!window.ZXing){msg('Не загрузилась библиотека сканера. Проверьте интернет и перезагрузите страницу.','bad');return null}
  var h=new Map();
- h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.CODE_128,ZXing.BarcodeFormat.ITF,ZXing.BarcodeFormat.UPC_A]);
+ h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.CODE_128,ZXing.BarcodeFormat.ITF,ZXing.BarcodeFormat.UPC_A,ZXing.BarcodeFormat.UPC_E]);
  h.set(ZXing.DecodeHintType.TRY_HARDER,true);
- return new ZXing.BrowserMultiFormatReader(h)}
+ h.set(ZXing.DecodeHintType.ALSO_INVERTED,true);
+ return new ZXing.BrowserMultiFormatReader(h,250)}
 function cam(){
- if(live){stopLive();return}
- if(!window.isSecureContext||!navigator.mediaDevices){msg('Живая камера недоступна при открытии из файла. Используйте кнопку «Сфотографировать».','bad');return}
+ if(live){stopLive();msg('Сканирование остановлено');return}
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg('Браузер не разрешает доступ к камере в этом режиме. Откройте файл через HTTPS-сайт или localhost; для file:// это зависит от браузера.','bad');return}
  zr=mkReader();if(!zr)return;
- live=true;$('v').hidden=false;$('cam').textContent='Живое сканирование: стоп';
- zr.decodeFromConstraints({video:{facingMode:'environment'}},'v',function(res){
-  if(res){var c=res.getText(),n=Date.now();if(c!==last.c||n-last.t>1500)addItem(c);last={c:c,t:n}}
- }).catch(function(){msg('Нет доступа к камере','bad');stopLive()})}
-function stopLive(){if(zr){try{zr.reset()}catch(e){}zr=null}live=false;$('v').hidden=true;$('cam').textContent='Живое сканирование: старт'}
-function stop(){stopLive()}
+ live=true;last={c:'',t:0};$('v').hidden=false;$('scanHelp').hidden=false;$('cam').textContent='Остановить сканирование';
+ msg('Запускаю камеру…');
+ var constraints={audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}};
+ try{
+  zr.decodeFromConstraints(constraints,$('v'),function(res,err,controls){
+   if(!live)return;
+   if(controls)liveControls=controls;
+   if(res){
+    var c=res.getText(),n=Date.now();
+    if(c!==last.c||n-last.t>2500){
+     last={c:c,t:n};
+     var ok=addItem(c);
+     if(!ok)msg('Штрихкод считан, но вес не распознан. Проверьте настройки: '+c,'bad');
+    }
+   }
+  }).then(function(controls){
+   if(!live){try{controls.stop()}catch(e){}return}
+   liveControls=controls;
+   var v=$('v');
+   var ready=function(){if(live)msg('Камера работает — наведите штрихкод в центр кадра');};
+   if(v.readyState>=2)ready();else v.onloadedmetadata=ready;
+  }).catch(function(e){
+   var detail=(e&&e.name)?' ('+e.name+')':'';
+   msg('Не удалось запустить камеру'+detail+'. Проверьте разрешение камеры и закройте её в других приложениях.','bad');stopLive(false);
+  });
+ }catch(e){msg('Ошибка запуска сканера: '+(e.message||e),'bad');stopLive(false)}
+}
+function stopLive(updateMessage){
+ live=false;
+ if(liveControls){try{liveControls.stop()}catch(e){}liveControls=null}
+ if(zr){try{zr.reset()}catch(e){}zr=null}
+ var v=$('v');try{v.pause();v.srcObject=null}catch(e){}
+ v.hidden=true;$('scanHelp').hidden=true;$('cam').textContent='Живое сканирование: старт';
+ if(updateMessage!==false)msg('Живое сканирование остановлено');
+}
+function stop(){if(live)stopLive()}
 $('shot').onchange=function(){
  var f=this.files[0];this.value='';if(!f)return;
- var r=mkReader();if(!r)return;msg('Распознаю…');
+ var r=mkReader();if(!r)return;msg('Распознаю фото…');
  var im=new Image();
  im.onload=function(){
-  var k=Math.min(1,1600/Math.max(im.width,im.height)),c=document.createElement('canvas');
+  var k=Math.min(1,2000/Math.max(im.width,im.height)),c=document.createElement('canvas');
   c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
   c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(im.src);
-  r.decodeFromImageUrl(c.toDataURL('image/jpeg',0.9)).then(function(res){addItem(res.getText())}).catch(function(){msg('Штрихкод не найден. Снимите ближе и ровнее, чтобы код занимал почти всю ширину кадра.','bad')})};
- im.onerror=function(){msg('Не удалось открыть фото','bad')};
+  r.decodeFromImageUrl(c.toDataURL('image/jpeg',0.95)).then(function(res){
+   var code=res.getText();if(!addItem(code))msg('Штрихкод считан, но вес не распознан. Проверьте настройки: '+code,'bad');
+  }).catch(function(){msg('Штрихкод не найден. Снимите ближе, уберите блики и держите код ровно.','bad')}).finally(function(){try{r.reset()}catch(e){}})};
+ im.onerror=function(){msg('Не удалось открыть фото','bad');try{r.reset()}catch(e){}};
  im.src=URL.createObjectURL(f)};
 
 /* stock */
