@@ -92,7 +92,7 @@ function addItem(raw){
  if(navigator.vibrate)try{navigator.vibrate(40)}catch(e){}
  renderStock();return true}
 
-/* camera */
+/* camera: iPhone-friendly camera selection and best-effort continuous autofocus */
 var zr=null,live=false,last={c:'',t:0},liveControls=null,scanTimer=null;
 function mkReader(){
  if(!window.ZXing){msg('Не загрузилась библиотека сканера. Проверьте интернет и перезагрузите страницу.','bad');return null}
@@ -100,16 +100,45 @@ function mkReader(){
  h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.CODE_128,ZXing.BarcodeFormat.ITF,ZXing.BarcodeFormat.UPC_A,ZXing.BarcodeFormat.UPC_E]);
  h.set(ZXing.DecodeHintType.TRY_HARDER,true);
  h.set(ZXing.DecodeHintType.ALSO_INVERTED,true);
- return new ZXing.BrowserMultiFormatReader(h,250)}
-function cam(){
+ return new ZXing.BrowserMultiFormatReader(h,180)}
+function rankCamera(label){
+ var n=(label||'').toLowerCase(),score=0;
+ if(/front|facetime|user/.test(n))return -1000;
+ if(/ultra.?wide|ultrawide|0\.5\s*x|ultra wide/.test(n))return -500;
+ if(/telephoto|telephoto|2\s*x|3\s*x|5\s*x/.test(n))score-=30;
+ if(/main|primary|1\s*x/.test(n))score+=30;
+ if(/back|rear|environment/.test(n))score+=15;
+ if(/wide/.test(n))score+=2;
+ if(/camera/.test(n))score+=1;
+ return score;
+}
+async function getPreferredCamera(){
+ // First briefly request the rear camera so iOS reveals camera labels in enumerateDevices().
+ var warm=null;
+ try{
+  warm=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'}}});
+  var devices=await navigator.mediaDevices.enumerateDevices();
+  var cams=devices.filter(function(d){return d.kind==='videoinput'});
+  cams.sort(function(a,b){return rankCamera(b.label)-rankCamera(a.label)});
+  var best=cams[0];
+  return best&&best.deviceId?{video:{deviceId:{exact:best.deviceId},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:30},advanced:[{focusMode:'continuous'}]},label:best.label||'задняя камера'}:{video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:30},advanced:[{focusMode:'continuous'}]},label:'задняя камера'};
+ }catch(e){
+  return {video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:30},advanced:[{focusMode:'continuous'}]},label:'задняя камера'};
+ }finally{
+  if(warm)warm.getTracks().forEach(function(t){try{t.stop()}catch(e){}});
+ }
+}
+async function cam(){
  if(live){stopLive();msg('Сканирование остановлено');return}
- if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg('Браузер не разрешает доступ к камере в этом режиме. Откройте файл через HTTPS-сайт или localhost; для file:// это зависит от браузера.','bad');return}
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg('Браузер не разрешает доступ к камере. Откройте опубликованную HTTPS-страницу и разрешите камеру.','bad');return}
  zr=mkReader();if(!zr)return;
  live=true;last={c:'',t:0};$('v').hidden=false;$('scanHelp').hidden=false;$('cam').textContent='Остановить сканирование';
- msg('Запускаю камеру…');
- var constraints={audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}};
+ msg('Подключаю заднюю камеру…');
+ var selected=await getPreferredCamera();
+ if(!live)return;
+ var constraints={audio:false,video:selected.video};
  try{
-  zr.decodeFromConstraints(constraints,$('v'),function(res,err,controls){
+  await zr.decodeFromConstraints(constraints,$('v'),function(res,err,controls){
    if(!live)return;
    if(controls)liveControls=controls;
    if(res){
@@ -123,10 +152,22 @@ function cam(){
   }).then(function(controls){
    if(!live){try{controls.stop()}catch(e){}return}
    liveControls=controls;
-   var v=$('v');
-   var ready=function(){if(live)msg('Камера работает — наведите штрихкод в центр кадра');};
+   // Some iOS camera drivers ignore focusMode in getUserMedia; retry it through applyConstraints.
+   try{controls.streamVideoConstraintsApply({advanced:[{focusMode:'continuous'}]}).catch(function(){});}catch(e){}
+   var v=$('v');v.setAttribute('autoplay','');v.setAttribute('playsinline','');v.muted=true;
+   var ready=function(){if(live)msg('Камера: '+selected.label+'. Держите штрихкод в центре кадра; автофокус зависит от выбранного объектива.');};
    if(v.readyState>=2)ready();else v.onloadedmetadata=ready;
-  }).catch(function(e){
+   var play=v.play();if(play&&play.catch)play.catch(function(){});
+  }).catch(async function(e){
+   // If a selected device ID is rejected by iOS, retry once with facingMode.
+   if(live&&selected.video.deviceId){
+    try{
+     var fallback={audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:30},advanced:[{focusMode:'continuous'}]}};
+     var controls=await zr.decodeFromConstraints(fallback,$('v'),function(res){if(!live||!res)return;var c=res.getText(),n=Date.now();if(c!==last.c||n-last.t>2500){last={c:c,t:n};if(!addItem(c))msg('Штрихкод считан, но вес не распознан: '+c,'bad')}});
+     if(live){liveControls=controls;msg('Камера запущена в совместимом режиме. Наведите штрихкод в центр кадра.');return}
+     controls.stop();
+    }catch(e2){}
+   }
    var detail=(e&&e.name)?' ('+e.name+')':'';
    msg('Не удалось запустить камеру'+detail+'. Проверьте разрешение камеры и закройте её в других приложениях.','bad');stopLive(false);
   });
