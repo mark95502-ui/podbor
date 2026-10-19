@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Подбор веса</title>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<style>
+:root{--bg:#f4f5f3;--fg:#1b1b1b;--card:#fff;--mut:#707070;--ac:#1d6fd1;--ok:#1a8a3c;--bad:#c62828;--bd:#d9d9d9;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#131313;--fg:#eee;--card:#202020;--mut:#9a9a9a;--ac:#5aa0f0;--ok:#4cc26b;--bad:#ef6a6a;--bd:#383838}}
+:root[data-theme="dark"]{--bg:#131313;--fg:#eee;--card:#202020;--mut:#9a9a9a;--ac:#5aa0f0;--ok:#4cc26b;--bad:#ef6a6a;--bd:#383838}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Roboto,sans-serif;max-width:640px;margin:0 auto;padding:8px 12px 80px}
+.tabs{display:flex;gap:6px;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:6px 0;z-index:5}
+.tabs button{flex:1;padding:10px 4px;border:1px solid var(--bd);background:var(--card);color:var(--fg);border-radius:10px;font-size:15px}
+.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin:10px 0}
+button.b{padding:12px 14px;border:0;border-radius:10px;background:var(--ac);color:#fff;font-size:16px;width:100%}
+button.g{background:var(--ok)}button.r{background:transparent;color:var(--bad);border:1px solid var(--bd)}
+button.s{padding:6px 10px;width:auto;font-size:14px}
+input,textarea{width:100%;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--fg);font-size:16px}
+textarea{min-height:90px}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+.big{font-size:34px;font-weight:700;text-align:center}
+.mut{color:var(--mut);font-size:14px}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.chip{display:inline-block;padding:3px 8px;margin:2px;border:1px solid var(--bd);border-radius:8px;font-variant-numeric:tabular-nums}
+video{width:100%;border-radius:10px;background:#000;max-height:260px;object-fit:cover}
+.done{opacity:.45}
+label{font-size:13px;color:var(--mut)}
+details summary{cursor:pointer;color:var(--mut)}
+.h{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+</style></head><body>
+<div class="tabs"><button id="t0" class="on">Приёмка</button><button id="t1">Заказы</button><button id="t2">Склад</button></div>
+
+<section id="p0">
+ <div class="card">
+  <div class="big" id="last">—</div>
+  <div class="mut" style="text-align:center" id="msg">Сфотографируйте штрихкод или введите вручную</div>
+  <video id="v" playsinline muted hidden></video>
+  <div class="row" style="margin-top:8px"><button class="b" id="cam">Живое сканирование: старт</button></div>
+  <div class="row" style="margin-top:8px"><button class="b r" id="swc" hidden>Сменить камеру</button></div>
+  <label style="display:block;text-align:center;margin-top:8px;padding:12px;border-radius:10px;border:1px solid var(--bd);color:var(--fg)"><input type="file" id="shot" accept="image/*" capture="environment" hidden>📷 Или сфотографировать штрихкод</label>
+  <div class="row" style="margin-top:8px"><input id="man" inputmode="decimal" placeholder="Штрихкод или вес (2.047)"><button class="b" id="add" style="flex:0 0 100px">Добавить</button></div>
+  <div class="mut" style="margin-top:6px">Всего на складе: <b id="cnt">0</b> шт, <b id="sum">0</b> кг</div>
+ </div>
+ <div class="card"><details><summary>Настройки штрихкода</summary>
+  <p class="mut">Для EAN-13 с весом (начинается на 2): с какой цифры вес, сколько цифр и сколько грамм в единице. Пример: 2 123456 <b>02047</b> 1 → с 8-й цифры, 5 цифр, ×1 г = 2047 г. Код GS1 с (3103) читается сам.</p>
+  <div class="row"><div><label>С цифры</label><input id="c_start" type="number"></div><div><label>Цифр</label><input id="c_len" type="number"></div><div><label>Грамм в ед.</label><input id="c_mult" type="number" step="any"></div><div><label>Допуск, г</label><input id="c_tol" type="number"></div></div>
+  <p class="mut">Проверьте на одной упаковке: добавьте её и сравните с весом на этикетке.</p>
+ </details></div>
+</section>
+
+<section id="p1" hidden>
+ <div class="card">
+  <label>Заказы в кг: каждый с новой строки или через пробел</label>
+  <textarea id="ord" placeholder="2&#10;3.6&#10;3&#10;20"></textarea>
+  <div style="margin-top:8px"><button class="b" id="go">Подобрать</button></div>
+  <div class="mut" id="gst" style="margin-top:6px"></div>
+ </div>
+ <div id="plan"></div>
+</section>
+
+<section id="p2" hidden>
+ <div class="card"><div class="h"><b>На складе</b><span class="mut" id="sc"></span></div><div id="stock"></div></div>
+ <div class="card"><div class="mut">Выдано: <b id="iss">0</b> шт</div>
+ <button class="b r" id="clr" style="margin-top:8px">Очистить склад и выданное</button></div>
+</section>
+
+<script>
+var S={items:[],plan:null,cfg:{start:8,len:5,mult:1,tol:50}};
+function load(){try{var j=JSON.parse(localStorage.getItem('podbor1')||'null');if(j){S.items=j.items||[];S.plan=j.plan||null;S.cfg=Object.assign(S.cfg,j.cfg||{})}}catch(e){}}
+function save(){try{localStorage.setItem('podbor1',JSON.stringify(S))}catch(e){}}
+var $=function(i){return document.getElementById(i)};
+function kg(g){return (g/1000).toFixed(3)}
+function msg(t,c){var m=$('msg');m.textContent=t;m.className='mut '+(c||'')}
+
+function parse(t){
+ t=String(t).trim().replace(',','.');if(!t)return null;
+ if(/^\d*\.\d+$/.test(t))return Math.round(parseFloat(t)*1000);
+ if(!/^\d+$/.test(t))return null;
+ if(t.length<=5)return parseInt(t,10);
+ var m=t.match(/310(\d)(\d{6})/);
+ if(m&&t.length>=18)return Math.round(parseInt(m[2],10)/Math.pow(10,+m[1])*1000);
+ if(t.length>=12){var c=S.cfg,s=t.substr(c.start-1,c.len);if(s.length==c.len)return Math.round(parseInt(s,10)*c.mult)}
+ return null}
+
+function addItem(raw){
+ var w=parse(raw);
+ if(!w||w<50||w>60000){msg('Не удалось прочитать вес: '+raw,'bad');return false}
+ S.items.push({id:Date.now()+Math.random(),w:w,code:String(raw),st:0});
+ save();$('last').textContent=kg(w)+' кг';msg('Добавлено','ok');
+ if(navigator.vibrate)try{navigator.vibrate(40)}catch(e){}
+ renderStock();return true}
+
+/* camera */
+var zr=null,live=false,last={c:'',t:0};
+function mkReader(){
+ if(!window.ZXing){msg('Не загрузилась библиотека сканера. Нужен интернет при открытии страницы.','bad');return null}
+ var h=new Map();
+ h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.CODE_128,ZXing.BarcodeFormat.ITF,ZXing.BarcodeFormat.UPC_A]);
+ h.set(ZXing.DecodeHintType.TRY_HARDER,true);
+ return new ZXing.BrowserMultiFormatReader(h)}
+function onRes(res){if(res){var c=res.getText(),n=Date.now();if(c!==last.c||n-last.t>1500)addItem(c);last={c:c,t:n}}}
+var devs=[],di=0;
+async function getDevs(){
+ var t=await navigator.mediaDevices.getUserMedia({video:true});t.getTracks().forEach(function(x){x.stop()});
+ var all=await navigator.mediaDevices.enumerateDevices();
+ devs=all.filter(function(d){return d.kind==='videoinput'});
+ var i=-1;
+ if(S.cfg.camId)i=devs.findIndex(function(d){return d.deviceId===S.cfg.camId});
+ if(i<0)i=devs.findIndex(function(d){return /^(back camera|задняя камера)$/i.test(d.label.trim())});
+ if(i<0)i=devs.findIndex(function(d){return /back|rear|задн/i.test(d.label)&&!/ultra|сверхшир/i.test(d.label)});
+ if(i<0)i=devs.length-1;
+ di=i}
+function startDev(){
+ if(zr){try{zr.reset()}catch(e){}}
+ zr=mkReader();if(!zr){stopLive();return}
+ var d=devs[di];S.cfg.camId=d.deviceId;save();
+ msg('Камера: '+(d.label||('№'+(di+1)))+(devs.length>1?'. Не та? Нажмите «Сменить камеру»':''));
+ zr.decodeFromVideoDevice(d.deviceId,'v',onRes).catch(function(){msg('Не удалось включить эту камеру','bad')})}
+async function cam(){
+ if(live){stopLive();return}
+ if(!window.isSecureContext||!navigator.mediaDevices){msg('Живая камера недоступна при открытии из файла. Откройте страницу по https-адресу.','bad');return}
+ live=true;$('v').hidden=false;$('cam').textContent='Живое сканирование: стоп';$('swc').hidden=false;
+ try{await getDevs();startDev()}catch(e){msg('Нет доступа к камере. Разрешите её в настройках Safari для этого сайта.','bad');stopLive()}}
+$('swc').onclick=function(){if(devs.length>1){di=(di+1)%devs.length;startDev()}};
+function stopLive(){if(zr){try{zr.reset()}catch(e){}zr=null}live=false;$('v').hidden=true;$('swc').hidden=true;$('cam').textContent='Живое сканирование: старт'}
+function stop(){stopLive()}
+$('shot').onchange=function(){
+ var f=this.files[0];this.value='';if(!f)return;
+ var r=mkReader();if(!r)return;msg('Распознаю…');
+ var im=new Image();
+ im.onload=function(){
+  var k=Math.min(1,1600/Math.max(im.width,im.height)),c=document.createElement('canvas');
+  c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+  c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(im.src);
+  r.decodeFromImageUrl(c.toDataURL('image/jpeg',0.9)).then(function(res){addItem(res.getText())}).catch(function(){msg('Штрихкод не найден. Снимите ближе и ровнее, чтобы код занимал почти всю ширину кадра.','bad')})};
+ im.onerror=function(){msg('Не удалось открыть фото','bad')};
+ im.src=URL.createObjectURL(f)};
+
+/* stock */
+function free(){return S.items.filter(function(x){return !x.st})}
+function renderStock(){
+ var f=free(),sum=f.reduce(function(a,x){return a+x.w},0);
+ $('cnt').textContent=f.length;$('sum').textContent=(sum/1000).toFixed(1);
+ $('sc').textContent=f.length+' шт, '+(sum/1000).toFixed(1)+' кг';
+ $('iss').textContent=S.items.length-f.length;
+ var s=f.slice().sort(function(a,b){return a.w-b.w});
+ $('stock').innerHTML=s.length?s.map(function(x){return '<span class="chip" data-d="'+x.id+'">'+kg(x.w)+' ✕</span>'}).join(''):'<span class="mut">Пусто</span>'}
+$('stock').onclick=function(e){var d=e.target.getAttribute('data-d');if(!d)return;S.items=S.items.filter(function(x){return String(x.id)!==d});save();renderStock()};
+
+/* fitting */
+function best(pool,T,tol){
+ var mx=T+tol,from=new Int32Array(mx+1).fill(-1),reach=new Uint8Array(mx+1);reach[0]=1;
+ for(var i=0;i<pool.length;i++){var w=pool[i].w;for(var s=mx;s>=w;s--){if(!reach[s]&&reach[s-w]){reach[s]=1;from[s]=i}}}
+ var bs=-1,bd=1e9;
+ for(var q=Math.max(1,T-tol);q<=mx;q++)if(reach[q]&&Math.abs(q-T)<bd){bd=Math.abs(q-T);bs=q}
+ if(bs<0)return null;
+ var out=[];q=bs;while(q>0){var k=from[q];out.push(k);q-=pool[k].w}
+ return out}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=a[i];a[i]=a[j];a[j]=t}return a}
+function runFit(targets,tol){
+ var base=free(),t0=Date.now(),bestR=null,bestSc=1e18;
+ for(var a=0;a<500;a++){
+  var idx=targets.map(function(_,i){return i});
+  if(a==0)idx.sort(function(x,y){return targets[x]-targets[y]});
+  else if(a==1)idx.sort(function(x,y){return targets[y]-targets[x]});
+  else shuffle(idx);
+  var pool=base.slice(),res=[],miss=0,dev=0;
+  for(var n=0;n<idx.length;n++){
+   var o=idx[n],sel=best(pool,targets[o],tol);
+   if(!sel){miss++;res[o]=null;continue}
+   var it=sel.map(function(i){return pool[i]}),sm=it.reduce(function(s,x){return s+x.w},0),ids={};
+   it.forEach(function(x){ids[x.id]=1});pool=pool.filter(function(x){return !ids[x.id]});
+   res[o]={ids:it.map(function(x){return x.id}),sum:sm};dev+=Math.abs(sm-targets[o])}
+  var sc=miss*1e9+dev;
+  if(sc<bestSc){bestSc=sc;bestR=res}
+  if(bestSc<targets.length*8||Date.now()-t0>2000)break}
+ var used={};
+ bestR.forEach(function(r){if(r)r.ids.forEach(function(d){used[d]=1})});
+ var pool2=base.filter(function(x){return !used[x.id]});
+ bestR.forEach(function(r,i){
+  if(r)return;
+  var T=targets[i],sel=best(pool2,T,Math.min(T-1,600));
+  if(!sel)return;
+  var it=sel.map(function(k){return pool2[k]}),sm=it.reduce(function(a,x){return a+x.w},0),ids={};
+  it.forEach(function(x){ids[x.id]=1});
+  pool2=pool2.filter(function(x){return !ids[x.id]});
+  bestR[i]={ids:it.map(function(x){return x.id}),sum:sm,out:true}});
+ return bestR}
+
+$('go').onclick=function(){
+ var t=$('ord').value.split(/[\s;]+/).map(function(x){return Math.round(parseFloat(x.replace(',','.'))*1000)}).filter(function(x){return x>0});
+ if(!t.length){$('gst').textContent='Введите заказы';return}
+ if(!free().length){$('gst').textContent='На складе нет кусков';return}
+ $('gst').textContent='Считаю…';
+ setTimeout(function(){
+  var r=runFit(t,S.cfg.tol);
+  S.plan=t.map(function(g,i){return {t:g,ids:r[i]?r[i].ids:null,out:r[i]?!!r[i].out:false,done:false}});
+  save();
+  var ot=t.reduce(function(a,x){return a+x},0),ft=free().reduce(function(a,x){return a+x.w},0);
+  var out=S.plan.filter(function(o){return o.out}).length,miss=S.plan.filter(function(o){return !o.ids}).length;
+  $('gst').innerHTML='Заказано '+kg(ot)+' кг, на складе '+kg(ft)+' кг, запас '+kg(ft-ot)+' кг ('+Math.round((ft-ot)/ot*100)+'%)'
+   +(out?'<br><span class="bad">Вне допуска: '+out+'</span>':'')+(miss?'<br><span class="bad">Не набрано совсем: '+miss+'</span>':'');
+  renderPlan()},30)};
+
+function renderPlan(){
+ var p=S.plan,el=$('plan');if(!p){el.innerHTML='';return}
+ var byId={};S.items.forEach(function(x){byId[x.id]=x});
+ var bal=0,html='';
+ p.forEach(function(o,i){
+  if(o.ids&&!o.done){var s=0;o.ids.forEach(function(d){s+=byId[d]?byId[d].w:0});bal+=s-o.t}});
+ p.forEach(function(o,i){
+  if(!o.ids){html+='<div class="card"><b>Заказ '+kg(o.t)+' кг</b><div class="bad">Нет подходящего набора даже в пределах ±600 г. Добавьте куски на склад</div></div>';return}
+  var its=o.ids.map(function(d){return byId[d]}).filter(Boolean),s=its.reduce(function(a,x){return a+x.w},0),dv=s-o.t;
+  html+='<div class="card'+(o.done?' done':'')+'"><div class="h"><b>Заказ '+kg(o.t)+' кг'+(o.out?' <span class="bad">вне допуска</span>':'')+'</b><span class="'+(Math.abs(dv)<=S.cfg.tol?'ok':'bad')+'">'+(dv>=0?'+':'')+dv+' г</span></div>'
+  +'<div>'+its.sort(function(a,b){return b.w-a.w}).map(function(x){return '<span class="chip">'+kg(x.w)+'</span>'}).join('')+'</div>'
+  +'<div class="mut">Итого '+kg(s)+' кг, '+its.length+' шт</div>'
+  +(o.done?'<div class="ok">Выдано</div>':'<button class="b g" style="margin-top:8px" data-i="'+i+'">'+(o.out?'Принять и выдать':'Выдано')+'</button>')+'</div>'});
+ el.innerHTML=html};
+$('plan').onclick=function(e){
+ var i=e.target.getAttribute('data-i');if(i===null)return;
+ var o=S.plan[+i];o.done=true;var ids={};o.ids.forEach(function(d){ids[d]=1});
+ S.items.forEach(function(x){if(ids[x.id])x.st=1});
+ save();renderPlan();renderStock()};
+
+/* ui */
+['t0','t1','t2'].forEach(function(id,n){$(id).onclick=function(){
+ ['t0','t1','t2'].forEach(function(k,m){$(k).className=m==n?'on':'';$('p'+m).hidden=m!=n});
+ if(n==2)renderStock();if(n==1)renderPlan();if(n!=0)stop()}});
+$('cam').onclick=cam;
+$('add').onclick=function(){var v=$('man').value;if(addItem(v))$('man').value=''};
+$('man').onkeydown=function(e){if(e.key==='Enter')$('add').onclick()};
+var cl=0;$('clr').onclick=function(){
+ if(!cl){cl=1;$('clr').textContent='Точно удалить всё? Нажмите ещё раз';setTimeout(function(){cl=0;$('clr').textContent='Очистить склад и выданное'},4000);return}
+ S.items=[];S.plan=null;save();cl=0;$('clr').textContent='Очистить склад и выданное';renderStock();renderPlan()};
+[['c_start','start'],['c_len','len'],['c_mult','mult'],['c_tol','tol']].forEach(function(p){
+ $(p[0]).onchange=function(){var v=parseFloat(this.value);if(v>0){S.cfg[p[1]]=v;save()}}});
+load();
+['start','len','mult','tol'].forEach(function(k){$('c_'+k).value=S.cfg[k]});
+renderStock();
+</script></body></html>
