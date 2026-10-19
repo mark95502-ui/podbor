@@ -35,8 +35,9 @@ details summary{cursor:pointer;color:var(--mut)}
   <div class="big" id="last">—</div>
   <div class="mut" style="text-align:center" id="msg">Сфотографируйте штрихкод или введите вручную</div>
   <video id="v" playsinline muted hidden></video>
-  <label style="display:block;text-align:center;margin-top:8px;padding:14px;border-radius:10px;background:var(--ac);color:#fff;font-size:17px"><input type="file" id="shot" accept="image/*" capture="environment" hidden>📷 Сфотографировать штрихкод</label>
-  <div class="row" style="margin-top:8px"><button class="b r" id="cam">Живое сканирование: старт</button></div>
+  <div class="row" style="margin-top:8px"><button class="b" id="cam">Живое сканирование: старт</button></div>
+  <div class="row" style="margin-top:8px"><button class="b r" id="swc" hidden>Сменить камеру</button></div>
+  <label style="display:block;text-align:center;margin-top:8px;padding:12px;border-radius:10px;border:1px solid var(--bd);color:var(--fg)"><input type="file" id="shot" accept="image/*" capture="environment" hidden>📷 Или сфотографировать штрихкод</label>
   <div class="row" style="margin-top:8px"><input id="man" inputmode="decimal" placeholder="Штрихкод или вес (2.047)"><button class="b" id="add" style="flex:0 0 100px">Добавить</button></div>
   <div class="mut" style="margin-top:6px">Всего на складе: <b id="cnt">0</b> шт, <b id="sum">0</b> кг</div>
  </div>
@@ -98,17 +99,30 @@ function mkReader(){
  h.set(ZXing.DecodeHintType.TRY_HARDER,true);
  return new ZXing.BrowserMultiFormatReader(h)}
 function onRes(res){if(res){var c=res.getText(),n=Date.now();if(c!==last.c||n-last.t>1500)addItem(c);last={c:c,t:n}}}
-function tryCam(c,fail){
+var devs=[],di=0;
+async function getDevs(){
+ var t=await navigator.mediaDevices.getUserMedia({video:true});t.getTracks().forEach(function(x){x.stop()});
+ var all=await navigator.mediaDevices.enumerateDevices();
+ devs=all.filter(function(d){return d.kind==='videoinput'});
+ var i=-1;
+ if(S.cfg.camId)i=devs.findIndex(function(d){return d.deviceId===S.cfg.camId});
+ if(i<0)i=devs.findIndex(function(d){return /^(back camera|задняя камера)$/i.test(d.label.trim())});
+ if(i<0)i=devs.findIndex(function(d){return /back|rear|задн/i.test(d.label)&&!/ultra|сверхшир/i.test(d.label)});
+ if(i<0)i=devs.length-1;
+ di=i}
+function startDev(){
  if(zr){try{zr.reset()}catch(e){}}
  zr=mkReader();if(!zr){stopLive();return}
- zr.decodeFromConstraints({video:c},'v',onRes).catch(fail)}
-function cam(){
+ var d=devs[di];S.cfg.camId=d.deviceId;save();
+ msg('Камера: '+(d.label||('№'+(di+1)))+(devs.length>1?'. Не та? Нажмите «Сменить камеру»':''));
+ zr.decodeFromVideoDevice(d.deviceId,'v',onRes).catch(function(){msg('Не удалось включить эту камеру','bad')})}
+async function cam(){
  if(live){stopLive();return}
- if(!window.isSecureContext||!navigator.mediaDevices){msg('Живая камера недоступна при открытии из файла. Используйте кнопку «Сфотографировать».','bad');return}
- live=true;$('v').hidden=false;$('cam').textContent='Живое сканирование: стоп';
- tryCam({facingMode:{exact:'environment'},width:{ideal:1280}},function(){
-  tryCam({facingMode:'environment'},function(){msg('Нет доступа к камере','bad');stopLive()})})}
-function stopLive(){if(zr){try{zr.reset()}catch(e){}zr=null}live=false;$('v').hidden=true;$('cam').textContent='Живое сканирование: старт'}
+ if(!window.isSecureContext||!navigator.mediaDevices){msg('Живая камера недоступна при открытии из файла. Откройте страницу по https-адресу.','bad');return}
+ live=true;$('v').hidden=false;$('cam').textContent='Живое сканирование: стоп';$('swc').hidden=false;
+ try{await getDevs();startDev()}catch(e){msg('Нет доступа к камере. Разрешите её в настройках Safari для этого сайта.','bad');stopLive()}}
+$('swc').onclick=function(){if(devs.length>1){di=(di+1)%devs.length;startDev()}};
+function stopLive(){if(zr){try{zr.reset()}catch(e){}zr=null}live=false;$('v').hidden=true;$('swc').hidden=true;$('cam').textContent='Живое сканирование: старт'}
 function stop(){stopLive()}
 $('shot').onchange=function(){
  var f=this.files[0];this.value='';if(!f)return;
